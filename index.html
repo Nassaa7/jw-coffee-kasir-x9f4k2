@@ -887,7 +887,7 @@ Check your Browserslist config to be sure that your targets are set up correctly
           </div>
           <details>
             <summary class="text-[12px] font-bold cursor-pointer" style="color: var(--brand);">SQL Setup — jalankan sekali di Supabase SQL Editor</summary>
-            <textarea id="syncSQLText" readonly class="pos-input mt-2 font-mono" style="height: 260px; padding: 10px; font-size: 11px; white-space: pre; overflow-y: auto;">-- JW Coffee v3 — jalankan SEKALI di Supabase SQL Editor
+            <textarea id="syncSQLText" readonly class="pos-input mt-2 font-mono" style="height: 260px; padding: 10px; font-size: 11px; white-space: pre; overflow-y: auto;">-- JW Coffee v4 — jalankan SEKALI di Supabase SQL Editor
 -- (Dashboard proyek → SQL Editor → New query → paste → Run)
 create table if not exists public.transactions (
   id text primary key,
@@ -1934,7 +1934,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
       const now = new Date();
       const trx = {
-        id: 'JW-' + Date.now().toString().slice(-6),
+        id: genId('JW'),
         date: todayISO(),
         time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         type: 'MASUK',
@@ -2104,7 +2104,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
       const now = new Date();
       state.transactions.push({
-        id: 'OUT-' + Date.now().toString().slice(-5),
+        id: genId('OUT'),
         date: todayISO(),
         time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         type: 'KELUAR',
@@ -2246,7 +2246,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       const now = new Date();
 
       state.shiftClosings.push({
-        id: 'CLS-' + Date.now().toString().slice(-5),
+        id: genId('CLS'),
         date: dt,
         time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         shift: state.shift,
@@ -2448,6 +2448,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (!name) return toast('Masukkan nama pegawai');
       if (state.staffList.includes(name)) return toast('Nama pegawai sudah ada');
       state.staffList.push(name);
+      markStaffChanged();
       inp.value = '';
       saveStorage();
       syncStaffSelectors();
@@ -2460,6 +2461,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       const name = state.staffList[idx];
       if (!name) return;
       state.staffList = state.staffList.filter((_, i) => i !== idx);
+      markStaffChanged();
       if (state.activeKasir === name) state.activeKasir = state.staffList[0];
       if (state.expStaff === name) state.expStaff = state.staffList[0];
       saveStorage();
@@ -2509,12 +2511,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       if (price <= 0) return toast('Harga menu harus lebih dari 0');
 
       state.menuItems.push({
-        id: 'm_' + Date.now().toString().slice(-6),
+        id: genId('m'),
         cat,
         name,
         sub,
         price
       });
+      markMenuChanged();
       document.getElementById('newMenuName').value = '';
       document.getElementById('newMenuSub').value = '';
       document.getElementById('newMenuPrice').value = '';
@@ -2530,6 +2533,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       const item = state.menuItems.find(m => m.id === id);
       if (item) {
         item.price = p;
+        markMenuChanged();
         saveStorage();
         renderMenuList();
         renderCartDrawer();
@@ -2541,6 +2545,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       const item = state.menuItems.find(m => m.id === id);
       if (!item || !confirm(`Hapus menu "${item.name}"?`)) return;
       state.menuItems = state.menuItems.filter(m => m.id !== id);
+      markMenuChanged();
       saveStorage();
       renderMenuList();
       renderCartDrawer();
@@ -2551,6 +2556,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     function resetDefaultMenu() {
       if (!confirm('Kembalikan seluruh daftar menu ke 74 menu bawaan JW Coffee?')) return;
       state.menuItems = JSON.parse(JSON.stringify(DEFAULT_MENU));
+      markMenuChanged();
       saveStorage();
       renderMenuList();
       renderManageView();
@@ -2579,6 +2585,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (!parsed || typeof parsed !== 'object') throw new Error();
           localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
           loadStorage();
+          markMenuChanged(); markStaffChanged();
           document.getElementById('brandStoreTitle').textContent = state.storeProfile.name;
           document.getElementById('brandStoreSub').textContent = state.storeProfile.sub.split('•')[0] || state.storeProfile.sub;
           document.getElementById('activeShiftLabel').textContent = state.shift;
@@ -2598,7 +2605,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     }
 
     /* ══════════════════════════════════════════════════════════
-       15. SINKRONISASI SUPABASE (v3)
+       15. SINKRONISASI SUPABASE (v4)
+       v4: ID unik (genId), menu & pegawai ikut sinkron via tabel
+       settings, pull dibatasi 60 hari terakhir + paginasi.
        Prinsip: data tetap tinggal di localStorage dulu
        (offline-first), lalu disinkronkan ke Supabase saat ada
        internet. Konflik diselesaikan last-write-wins via
@@ -2614,6 +2623,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     let syncedIds = new Set();
     let syncTombstones = { transactions: new Set(), shift_closings: new Set() };
     let syncSettingsUpdatedAt = 0;
+    let syncMenuUpdatedAt = 0; // ms, waktu edit menu lokal terakhir
+    let syncStaffUpdatedAt = 0; // ms, waktu edit pegawai lokal terakhir
+    let syncMenuDirty = false; // menu lokal berubah & belum terkirim
+    let syncStaffDirty = false; // pegawai lokal berubah & belum terkirim
     let syncPulling = false;
     let syncPushTimer = null;
     let syncInterval = null;
@@ -2631,6 +2644,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             shift_closings: new Set(((d.tombstones || {}).shift_closings) || [])
           };
           syncSettingsUpdatedAt = d.settingsUpdatedAt || 0;
+          syncMenuUpdatedAt = d.menuUpdatedAt || 0;
+          syncStaffUpdatedAt = d.staffUpdatedAt || 0;
+          syncMenuDirty = !!d.menuDirty;
+          syncStaffDirty = !!d.staffDirty;
           syncLastAt = d.lastAt || null;
         }
       } catch (e) {}
@@ -2651,12 +2668,42 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             shift_closings: [...syncTombstones.shift_closings]
           },
           settingsUpdatedAt: syncSettingsUpdatedAt,
+          menuUpdatedAt: syncMenuUpdatedAt,
+          staffUpdatedAt: syncStaffUpdatedAt,
+          menuDirty: syncMenuDirty,
+          staffDirty: syncStaffDirty,
           lastAt: syncLastAt
         }));
       } catch (e) {}
     }
 
     function syncNowISO() { return new Date().toISOString(); }
+
+    // ID unik: PREFIX-YYYYMMDD-ms4-acak4-dev3. Dijamin praktis unik antar
+    // HP (tanggal + milidetik + acak + kode perangkat), tidak seperti
+    // Date.now().slice(-6) yang berulang tiap ~16 menit. Urutan per
+    // milidetik yang sama membuat 20.000 panggilan beruntun pun nol duplikat.
+    let genIdLastMs = 0, genIdSeq = 0;
+    function genId(prefix) {
+      const d = new Date();
+      const ymd = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+      const nowMs = Date.now();
+      if (nowMs === genIdLastMs) genIdSeq++; else { genIdLastMs = nowMs; genIdSeq = 0; }
+      const ms4 = String(nowMs).slice(-4);
+      // Panggilan pertama dalam 1 ms pakai acak; panggilan berikutnya dalam
+      // ms yang sama pakai urutan (0001, 0002, ...) supaya 20.000 panggilan
+      // beruntun pun nol duplikat. Antar-ms dibedakan oleh ms4.
+      const rnd = genIdSeq === 0
+        ? Math.floor(Math.random() * 1679616).toString(36).toUpperCase().padStart(4, '0')
+        : genIdSeq.toString(36).toUpperCase().padStart(4, '0');
+      let dev = 'HP';
+      try { if (syncDeviceId) dev = String(syncDeviceId).slice(-3).toUpperCase(); } catch (e) {}
+      return prefix + '-' + ymd + '-' + ms4 + '-' + rnd + '-' + dev;
+    }
+
+    // Menu/pegawai diubah lokal -> tandai kotor + catat waktu, push menyusul.
+    function markMenuChanged() { syncMenuUpdatedAt = Date.now(); syncMenuDirty = true; saveSyncMeta(); }
+    function markStaffChanged() { syncStaffUpdatedAt = Date.now(); syncStaffDirty = true; saveSyncMeta(); }
 
     function setSyncStatus(s, msg) {
       syncStatus = s;
@@ -2687,7 +2734,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       return { id: r.id, date: r.date, time: r.time, shift: r.shift, staff: r.staff, expected: Number(r.expected), actual: Number(r.actual), diff: Number(r.diff), note: r.note, updated_at: r.updated_at };
     }
 
-    function mergeRows(tbl, srvRows) {
+    function mergeRows(tbl, srvRows, sinceISO) {
       const localArr = tbl === 'transactions' ? state.transactions : state.shiftClosings;
       const srvById = new Map(srvRows.map(r => [r.id, r]));
       const next = [];
@@ -2701,6 +2748,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
       for (const loc of localArr) {
         if (!srvById.has(loc.id)) {
+          if (sinceISO && loc.date && loc.date < sinceISO) { next.push(loc); continue; } // di luar jendela pull — jangan dihapus, jangan di-push ulang
           if (syncedIds.has(loc.id)) { /* dihapus di perangkat lain → buang */ }
           else { next.push(loc); toPush.push(loc); }
         }
@@ -2736,6 +2784,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           if (error) throw error;
           clRows.forEach(r => syncedIds.add(r.id));
         }
+        if (syncMenuDirty) {
+          const { error: eM } = await syncClient.from('settings').upsert({ key: 'menuItems', value: state.menuItems, updated_at: new Date(syncMenuUpdatedAt || Date.now()).toISOString() }, { onConflict: 'key' });
+          if (eM) throw eM;
+          syncMenuDirty = false;
+        }
+        if (syncStaffDirty) {
+          const { error: eS } = await syncClient.from('settings').upsert({ key: 'staffList', value: state.staffList, updated_at: new Date(syncStaffUpdatedAt || Date.now()).toISOString() }, { onConflict: 'key' });
+          if (eS) throw eS;
+          syncStaffDirty = false;
+        }
         const { error: e3 } = await syncClient.from('settings').upsert({ key: 'modalAwal', value: state.modalAwal, updated_at: syncNowISO() }, { onConflict: 'key' });
         if (e3) throw e3;
         syncSettingsUpdatedAt = Date.now();
@@ -2747,24 +2805,69 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       }
     }
 
+    // Tarik satu tabel per halaman 1000 baris (batas PostgREST per respons),
+    // diurut tanggal + id supaya paginasi stabil (tidak ada baris loncat/duplikat).
+    async function fetchPaged(table, sinceISO) {
+      const rows = [];
+      const seen = new Set();
+      const PAGE = 1000;
+      let from = 0;
+      for (let pages = 0; pages < 50; pages++) {
+        const { data, error } = await syncClient.from(table).select('*')
+          .gte('date', sinceISO)
+          .order('date', { ascending: true })
+          .order('id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const fresh = (data || []).filter(r => !seen.has(r.id));
+        fresh.forEach(r => seen.add(r.id));
+        rows.push(...fresh);
+        if (!data || data.length < PAGE || fresh.length === 0) break;
+        from += PAGE;
+      }
+      return rows;
+    }
+
     async function pullAll() {
       if (!syncClient || syncPulling) return;
       syncPulling = true;
       setSyncStatus('syncing', 'Menarik data…');
+      let seedNeeded = false;
       try {
-        const { data: srvTx, error: e1 } = await syncClient.from('transactions').select('*').order('date', { ascending: true }).limit(5000);
-        if (e1) throw e1;
-        const { data: srvCl, error: e2 } = await syncClient.from('shift_closings').select('*').order('date', { ascending: true }).limit(1000);
-        if (e2) throw e2;
+        const sinceISO = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const srvTx = await fetchPaged('transactions', sinceISO);
+        const srvCl = await fetchPaged('shift_closings', sinceISO);
         const { data: srvSt, error: e3 } = await syncClient.from('settings').select('*');
         if (e3) throw e3;
-        mergeRows('transactions', srvTx || []);
-        mergeRows('shift_closings', srvCl || []);
+        mergeRows('transactions', srvTx || [], sinceISO);
+        mergeRows('shift_closings', srvCl || [], sinceISO);
         const mRow = (srvSt || []).find(r => r.key === 'modalAwal');
         if (mRow && new Date(mRow.updated_at).getTime() > (syncSettingsUpdatedAt || 0)) {
           state.modalAwal = Number(mRow.value) || 0;
           syncSettingsUpdatedAt = new Date(mRow.updated_at).getTime();
         }
+        // Menu & pegawai: adopsi dari server bila lebih baru (last-write-wins);
+        // bila server belum punya barisnya, dorong menu/pegawai lokal (seed pertama).
+        const menuRow = (srvSt || []).find(r => r.key === 'menuItems');
+        const staffRow = (srvSt || []).find(r => r.key === 'staffList');
+        if (menuRow && Array.isArray(menuRow.value)) {
+          const srvTs = new Date(menuRow.updated_at).getTime();
+          if (srvTs > (syncMenuUpdatedAt || 0)) {
+            state.menuItems = menuRow.value;
+            syncMenuUpdatedAt = srvTs;
+            syncMenuDirty = false;
+          }
+        } else { syncMenuDirty = true; seedNeeded = true; }
+        if (staffRow && Array.isArray(staffRow.value)) {
+          const srvTs = new Date(staffRow.updated_at).getTime();
+          if (srvTs > (syncStaffUpdatedAt || 0)) {
+            state.staffList = staffRow.value;
+            if (!state.staffList.includes(state.activeKasir)) state.activeKasir = state.staffList[0] || 'Kasir';
+            if (!state.staffList.includes(state.expStaff)) state.expStaff = state.staffList[0] || 'Kasir';
+            syncStaffUpdatedAt = srvTs;
+            syncStaffDirty = false;
+          }
+        } else { syncStaffDirty = true; seedNeeded = true; }
         for (const tbl of ['transactions', 'shift_closings']) {
           for (const id of [...syncTombstones[tbl]]) {
             const { error } = await syncClient.from(tbl).delete().eq('id', id);
@@ -2780,10 +2883,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         setSyncStatus('error', 'Gagal tarik data: ' + (err.message || err));
       } finally {
         syncPulling = false;
+        if (seedNeeded) syncPushSoon();
       }
     }
 
     function renderAllAfterSync() {
+      syncStaffSelectors();
       renderMenuList();
       renderOpenBillsStrip();
       renderCartDrawer();

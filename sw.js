@@ -1,6 +1,6 @@
 /* JW Coffee PWA — service worker. Cache-first untuk file aplikasi (same-origin),
    network-only untuk API Supabase (cross-origin) dan semua non-GET. */
-const CACHE = 'jw-coffee-v1';
+const CACHE = 'jw-coffee-v2';
 const CORE = [
   './index.html',
   './manifest.webmanifest',
